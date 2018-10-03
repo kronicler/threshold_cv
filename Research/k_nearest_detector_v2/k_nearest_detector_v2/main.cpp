@@ -12,51 +12,37 @@
 #include "opencv2/imgproc.hpp"
 #include "opencv2/core.hpp"
 #include "opencv2/highgui.hpp"
-#include <image_transport/image_transport.h>
-#include <sensor_msgs/Image.h>
-#include <cv_bridge/cv_bridge.h>
-#include "ros/ros.h"
-#include <dynamic_reconfigure/server.h>
-#include <k_nearest/k_nearestConfig.h>
-
 #define INT_INF 2147483640
 
 using namespace cv;
 using namespace std;
-using namespace ros;
 
-float MULTIPLER_GLOBAL = 10;
+/**
+ * Three parameters to tune
+ * COLOR_SELECT lets you choose what color you wish to target
+ * DISTANCE_DIFFERENCE determines the max distance you wish to stretch the color space (makes colors more distinct)
+ * DISTANCE_LIMIT_FILTER additional filter to make sure that we only perform adaptive if it is below a certain distance
+ * OUTPUT_MODE determines which output you wish to view
+ * MIN_HARDSTOP determines the cut off before no masking is shown at all
+*/
+
+
 float MIN_GLOBAL, MAX_GLOBAL;
-image_transport::Publisher image_pub;
-
-string COLOR_SELECT = "PURE_GREEN";
-bool DISTANCE_DIFFERENCE_MANUAL_BOOL = false;
-int DISTANCE_DIFFERENCE_MANUAL;
-bool DISTANCE_LIMIT_FILTER_MANUAL_BOOL = false;
-float DISTANCE_LIMIT_FILTER_MANUAL;
-
-bool MANUAL_COLORS_BOOL = false;
-float MANUAL_L = 0;
-float MANUAL_A = 0;
-float MANUAL_B = 0;
-
+string COLOR_SELECT = "CUSTOM";
 float CLIMB = 0.1;
 
 class ColorMap {
     vector<float> colorArray = {0,0,0};
     int DISTANCE_DIFFERENCE = 1000;
-    float DISTANCE_LIMIT_FILTER = 255; // More means larger allowance
+    float DISTANCE_LIMIT_FILTER = 370; // More means larger allowance (max is 370)
     float MIN_HARDSTOP = 50; // More means more leeway. Use this to stop detection if color you want is really not in view
-
 public:
     ColorMap (string COLOR_SELECT) {
         if (COLOR_SELECT == "PURE_RED") {
             colorArray = {54.29/100 * 255, 80.81 + 127, 69.89 + 127};
-            DISTANCE_DIFFERENCE = 800;
         }
         else if (COLOR_SELECT == "PURE_GREEN") {
             colorArray = {46.228/100 * 255, -51.699 + 127,  49.897 + 127};
-            DISTANCE_DIFFERENCE = 500;
         }
         else if (COLOR_SELECT == "PURE_BLUE") {
             colorArray = {29.57/100 * 255, 68.30 + 127,  -112.03 + 127};
@@ -64,40 +50,27 @@ public:
         else if (COLOR_SELECT == "PURE_YELLOW") {
             colorArray = {97.139/100 * 255, -21.558 + 127,  94.477 + 127};
         }
-        else if (COLOR_SELECT == "DARK_GREEN") {
-            colorArray = {36.202/100 * 255, -43.37 + 127,  41.858 + 127};
+        else if (COLOR_SELECT == "DARK_BLUE") {
+            colorArray = {56.14306376, 163.50908374, 72.79013131};
+            MIN_HARDSTOP = 17;
         }
-        else if (COLOR_SELECT == "WEIRD_GREEN") {
-            colorArray = {116.09264337851928,  115.00685610010427, 127.26386339937434};
-            DISTANCE_DIFFERENCE = 3000;
+        else if (COLOR_SELECT == "SELECTIVE_PURE_RED") {
+            /**
+             * Steps:
+             * 1. First we find the minimum distance when red isnt present
+             * 2. We set that as DISTANCE_LIMIT_FILTER to block it out
+             * 3. We slowly tune DISTANCE_DIFFERENCE by lowering it so that the full range of our red is present when in
+             * view
+             */
+            colorArray = {54.29/100 * 255, 80.81 + 127, 69.89 + 127};
+            DISTANCE_DIFFERENCE = 200;
+            DISTANCE_LIMIT_FILTER = 67;
         }
-        else if (COLOR_SELECT == "WEIRD_RED") {
-            colorArray = {26.02/100 * 255,  21.96 + 127, 16.98 + 127};
-        }
-        else if (COLOR_SELECT == "WEIRD_BLUE") {
-            DISTANCE_DIFFERENCE = 2000;
-            colorArray = {125.50277161862527, 135.06203806356245, 106.72828898743533};
-        }
-        else if (COLOR_SELECT == "WEIRD_YELLOW") {
-            colorArray = {112.36884505868463, 134.8206993541218, 154.5124661434822};
-        }
-        else if (COLOR_SELECT == "BRIGHTER_BLUE") {
-            colorArray = {141.05574433656957, 142.39014563106795, 85.23480582524272};
+        else if (COLOR_SELECT == "CUSTOM") {
+            colorArray = {157.15862154, 118.09701874, 177.16864464};
         }
         else {
-            colorArray = {97.139/100 * 255, -21.558 + 127,  94.477 + 127};
-        }
-
-        if (DISTANCE_DIFFERENCE_MANUAL_BOOL) {
-            DISTANCE_DIFFERENCE = DISTANCE_DIFFERENCE_MANUAL;
-        }
-
-        if (DISTANCE_LIMIT_FILTER_MANUAL_BOOL) {
-            DISTANCE_LIMIT_FILTER = DISTANCE_LIMIT_FILTER_MANUAL;
-        }
-
-        if (MANUAL_COLORS_BOOL) {
-            colorArray = {MANUAL_L, MANUAL_A, MANUAL_B};
+            colorArray = {97.139/100 * 255, -21.558 + 127,  94.477 + 127}; // PURE_YELLOW
         }
     }
     
@@ -131,7 +104,7 @@ class pipeline {
     };
     
     FUNCTION_TYPE FUNCTION = MULTIPLICATIVE;
-    OUTPUT_MODE OUTPUT = MASKED;
+    OUTPUT_MODE OUTPUT = PROCESSED;
     
     
     float cartesian_dist (vector<float> colorArray, vector<uchar> lab_channels) {
@@ -145,7 +118,7 @@ class pipeline {
         Mat lab_image = input.clone();
         
         // Gaussian blurring
-        // GaussianBlur(input, lab_image, Size( 5, 5 ), 0, 0);
+//        GaussianBlur(input, lab_image, Size( 5, 5 ), 0, 0);
         cvtColor(lab_image, lab_image, CV_BGR2Lab);
         return lab_image;
     }
@@ -210,6 +183,7 @@ class pipeline {
                 img.at<uchar>(i, d) = 255 - round(dist);
             }
         }
+        
         // TODO: Double check this
         if (REAL_MIN > myColorChoice.getMinHardStop()) {
             // Ignore everything
@@ -220,7 +194,7 @@ class pipeline {
             
             autoAdjust(max, min);
         }
-
+        
         return img;
     }
     
@@ -282,127 +256,31 @@ public:
 };
 
 
-class ImageConverter {
-    NodeHandle nh_;
-    image_transport::ImageTransport it_;
-    image_transport::Subscriber image_sub_;
-    image_transport::Publisher image_pub_;
-
-public:
-    ImageConverter()
-    : it_(nh_) {
-        // Subscrive to input video feed and publish output video feed
-        image_sub_ = it_.subscribe("asv/camera2/image_color", 1,
-        &ImageConverter::imageCb, this);
-        image_pub_ = it_.advertise("k_nearest_viewer", 1);
-
-    }
-
-    ~ImageConverter()
-    {
-    }
-    void imageCb(const sensor_msgs::ImageConstPtr& msg) {
-        cv_bridge::CvImagePtr cv_ptr;
-        try {
-            cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-
-            if (image_pub_.getNumSubscribers()) {
-                resize (cv_ptr->image, cv_ptr->image, Size(), 0.25, 0.25);
-                pipeline myPipeline = pipeline(cv_ptr->image, MULTIPLER_GLOBAL);
-                // cout << myPipeline.getRealMin() << endl;
-                MULTIPLER_GLOBAL = myPipeline.getProposedMultipler();
-
-                // Output modified video stream
-                sensor_msgs::ImagePtr output_msg = cv_bridge::CvImage(std_msgs::Header(), "8UC1", myPipeline.visualise()).toImageMsg();
-                image_pub_.publish(output_msg);
-
-            } else {
-                sensor_msgs::ImagePtr output_msg = cv_bridge::CvImage(std_msgs::Header(), "BGR8", cv_ptr->image).toImageMsg();
-                image_pub_.publish(output_msg);
-            }
-        } catch (cv_bridge::Exception& e) {
-            ROS_ERROR("cv_bridge exception: %s", e.what());
-            return;
-        }
-    }
-};
-
-void callback(k_nearest::k_nearestConfig &config, uint32_t level) {
-
-    DISTANCE_DIFFERENCE_MANUAL_BOOL = config.distance_difference_manual_mode;
-    DISTANCE_DIFFERENCE_MANUAL = config.distance_difference;
-
-    DISTANCE_LIMIT_FILTER_MANUAL_BOOL = config.distance_limit_filter_manual_mode;
-    DISTANCE_LIMIT_FILTER_MANUAL = (float) config.distance_limit_filter;
-
-    if (DISTANCE_DIFFERENCE_MANUAL_BOOL) {
-        ROS_INFO("Setting distance difference: %d", 
-            config.distance_difference);
-
-        ROS_INFO("Setting distance limit filter: %lf", 
-            config.distance_limit_filter);
-    }
-
-    MANUAL_COLORS_BOOL = config.manual_color_set;
-
-    if (MANUAL_COLORS_BOOL) {
-        MANUAL_L = config.L;
-        MANUAL_A = config.A;
-        MANUAL_B = config.B;
-    } else {
-        switch (config.color_selection) {
-            case 0:
-                COLOR_SELECT = "PURE_RED";
-                break;
-            case 1: 
-                COLOR_SELECT = "PURE_GREEN";
-                break;
-            case 2: 
-                COLOR_SELECT = "PURE_BLUE";
-                break;
-            case 3:
-                COLOR_SELECT = "WEIRD_RED";
-                break;
-            case 4:
-                COLOR_SELECT = "WEIRD_GREEN";
-                break;
-            case 5: 
-                COLOR_SELECT = "WEIRD_BLUE";
-                break;
-            case 6:
-                COLOR_SELECT = "WEIRD_YELLOW";
-                break;
-            case 7:
-                COLOR_SELECT = "BRIGHTER_BLUE";
-                break;
-            case 8:
-                COLOR_SELECT = "PURE_YELLOW";
-                break;
-        }
-        ROS_INFO("Setting detection to detect: %s", COLOR_SELECT.c_str());
-    }
-
-    CLIMB = config.speed_of_adjustment;
-    ROS_INFO("Setting adjustment speed: %lf", CLIMB);
-}
-
-int main(int argc, char** argv)
-{
+int main(int argc, char ** argv) {
+    VideoCapture cap(0); // webcam
+    Mat source;
+    float multiplier = 10;
+    
+    vector<std::string> args(argv, argv + argc);
     if (argc > 1) {
-        vector<string> args(argv, argv + argc);
         cout << args[1] << endl;
         COLOR_SELECT = args[1];
     }
-    init(argc, argv, "k_nearest_detector");
-    ImageConverter ic;
+    
+    while (true) {
+        Mat output;
+        cap.read(source);
+        resize(source, source, Size(), 0.25, 0.25);
+        pipeline myPipeline = pipeline(source, multiplier);
 
-    dynamic_reconfigure::Server<k_nearest::k_nearestConfig> server;
-    dynamic_reconfigure::Server<k_nearest::k_nearestConfig>::CallbackType f;
+        namedWindow("My Window", WINDOW_AUTOSIZE);
+        multiplier = myPipeline.getProposedMultipler(); // To auto adjust
+//        cout << myPipeline.getRealMin() << endl;
 
-    f = boost::bind(&callback, _1, _2);
-    server.setCallback(f);
-
-
-    spin();
+        resize(myPipeline.visualise(), output, Size(), 2, 2); // upscale it up
+        
+        imshow("My Window", output);
+        waitKey(1);
+    }
     return 0;
 }

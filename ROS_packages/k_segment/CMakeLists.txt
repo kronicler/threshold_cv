@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(k_nearest)
+project(k_segment)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -93,7 +93,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## Generate dynamic reconfigure parameters in the 'cfg' folder
 generate_dynamic_reconfigure_options(
-  cfg/k_nearest_config.cfg
+  cfg/k_segment_config.cfg
 )
 
 ###################################
@@ -107,7 +107,7 @@ generate_dynamic_reconfigure_options(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES k_nearest
+#  LIBRARIES k_segment
 #  CATKIN_DEPENDS cv_bridge image_transport roscpp rospy sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
@@ -134,12 +134,12 @@ add_library(${PROJECT_NAME}
 )
 
 
-add_executable(k_nearest_wilson src/main.cpp)
-target_link_libraries(k_nearest_wilson ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+add_executable(k_segment_wilson src/main.cpp)
+target_link_libraries(k_segment_wilson ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 
-add_dependencies(k_nearest_wilson ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(k_nearest_wilson ${PROJECT_NAME}_gencfg)
+add_dependencies(k_segment_wilson ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(k_segment_wilson ${PROJECT_NAME}_gencfg)
 
 
 #############
@@ -182,7 +182,7 @@ add_dependencies(k_nearest_wilson ${PROJECT_NAME}_gencfg)
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_k_nearest.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_k_segment.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
